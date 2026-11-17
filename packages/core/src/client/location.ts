@@ -1,8 +1,11 @@
 import { ScramjetClient } from "@client/index";
 import { Tap } from "@/Tap";
 import { iswindow } from "@client/entry";
+import { SCRAMJETCLIENT } from "@/symbols";
 import {
 	Reflect_apply,
+	Reflect_get,
+	Reflect_has,
 	Object_setPrototypeOf,
 	_URL,
 	Object_defineProperty,
@@ -133,7 +136,128 @@ export function createLocationProxy(client: ScramjetClient, self: GlobalThis) {
 			},
 		});
 
-	// TODO: ancestorOrigins
+	if (iswindow) {
+		const native = client.natives.call(
+			"Object.getOwnPropertyDescriptor",
+			null,
+			self.location,
+			"ancestorOrigins"
+		);
+		// only expose it where the browser itself does (chromium, webkit)
+		if (native?.get) {
+			let list: DOMStringList | null = null;
+			Object_defineProperty(fakeLocation, "ancestorOrigins", {
+				configurable: false,
+				enumerable: true,
+				get: new Proxy(native.get, {
+					apply() {
+						// [SameObject]: the list is fixed when the document is created
+						if (!list)
+							list = createAncestorOrigins(
+								self,
+								Reflect_apply(native.get, self.location, [])
+							);
+
+						return list;
+					},
+				}),
+			});
+		}
+	}
 
 	return fakeLocation;
+}
+
+// the origins of the ancestor frames that are inside the proxy, nearest first.
+// a window outside the proxy context is treated as if it didn't exist, the same
+// way window.parent and window.top are emulated
+function collectAncestorOrigins(self: GlobalThis): string[] {
+	const origins: string[] = [];
+	let current = self;
+	for (;;) {
+		let parent: GlobalThis;
+		try {
+			parent = current.parent.self;
+			if (parent === current) break;
+			if (!(SCRAMJETCLIENT in parent)) break;
+		} catch {
+			break;
+		}
+		origins.push(parent[SCRAMJETCLIENT].url.origin);
+		current = parent;
+	}
+
+	return origins;
+}
+
+function createAncestorOrigins(
+	self: GlobalThis,
+	real: DOMStringList
+): DOMStringList {
+	const origins = collectAncestorOrigins(self);
+	const isIndex = (prop: string | symbol): prop is string =>
+		typeof prop === "string" && /^(0|[1-9]\d*)$/.test(prop);
+	const inRange = (prop: string | symbol) =>
+		isIndex(prop) && +prop < origins.length;
+
+	let proxy: DOMStringList;
+	const wrapMethod = (
+		name: "item" | "contains",
+		impl: (...args: any[]) => any
+	) =>
+		new Proxy(self.DOMStringList.prototype[name], {
+			apply(target, that, args) {
+				if (that === proxy) return impl(...args);
+
+				return Reflect_apply(target, that, args);
+			},
+		});
+	const item = wrapMethod("item", (index) => {
+		const i = Number(index) >>> 0;
+
+		return i < origins.length ? origins[i] : null;
+	});
+	const contains = wrapMethod("contains", (str) =>
+		origins.includes(String(str))
+	);
+
+	proxy = new Proxy(real, {
+		get(target, prop) {
+			if (prop === "length") return origins.length;
+			if (prop === "item") return item;
+			if (prop === "contains") return contains;
+			if (isIndex(prop)) return origins[+prop];
+
+			return Reflect_get(target, prop);
+		},
+		has(target, prop) {
+			if (isIndex(prop)) return inRange(prop);
+
+			return Reflect_has(target, prop);
+		},
+		ownKeys() {
+			return origins.map((_, i) => String(i));
+		},
+		getOwnPropertyDescriptor(target, prop) {
+			if (!inRange(prop)) return undefined;
+
+			return {
+				value: origins[+(prop as string)],
+				writable: false,
+				enumerable: true,
+				configurable: true,
+			};
+		},
+		set() {
+			return false;
+		},
+		defineProperty() {
+			return false;
+		},
+		deleteProperty(target, prop) {
+			return !inRange(prop);
+		},
+	});
+
+	return proxy;
 }

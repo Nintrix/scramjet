@@ -79,12 +79,34 @@ export default [
 		`,
 	}),
 	basicTest({
-		// KNOWN FAILURE: ancestorOrigins is missing from the proxy entirely.
 		name: "location-ancestororigins",
 		js: `
 			assert("ancestorOrigins" in location, "ancestorOrigins must exist");
 			assertEqual(typeof location.ancestorOrigins, "object", "ancestorOrigins is an object");
 			assertEqual(typeof location.ancestorOrigins.length, "number", "it has a length");
+			assertEqual(Object.prototype.toString.call(location.ancestorOrigins), "[object DOMStringList]", "brand");
+			assert(location.ancestorOrigins instanceof DOMStringList, "instanceof DOMStringList");
+			assertEqual(location.ancestorOrigins, location.ancestorOrigins, "[SameObject]");
+			// the page is the top of the proxy context, so the harness frame must not show up
+			assertEqual(location.ancestorOrigins.length, 0, "no ancestors outside the proxy");
+			assertEqual(location.ancestorOrigins.item(0), null, "item() past the end");
+			const d = Object.getOwnPropertyDescriptor(location, "ancestorOrigins");
+			assertEqual(typeof d.get, "function", "ancestorOrigins has a getter");
+			assertEqual(d.set, undefined, "ancestorOrigins is readonly");
+		`,
+	}),
+	basicTest({
+		name: "location-ancestororigins-iframe",
+		js: `
+			const f = document.createElement("iframe");
+			document.body.appendChild(f);
+			const list = f.contentWindow.location.ancestorOrigins;
+			assertEqual(list.length, 1, "one ancestor");
+			assertEqual(list[0], location.origin, "the parent's real origin");
+			assertEqual(list.item(0), location.origin, "item()");
+			assert(list.contains(location.origin), "contains()");
+			assert(!list[0].includes(":4500"), "must not expose the harness origin");
+			f.remove();
 		`,
 	}),
 	basicTest({
