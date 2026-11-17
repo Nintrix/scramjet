@@ -330,13 +330,43 @@ export default [
 		`,
 	}),
 	basicTest({
-		// KNOWN FAILURE: navigator.serviceWorker is absent - most likely
-		// deliberate, since the proxy owns the registration, but it is observable:
-		// PWAs feature-detect on it and take a different path when it is missing.
+		// the proxy owns the real registration, but a missing container is
+		// observable: PWAs feature-detect on it and take a different path.
 		name: "platform-navigator-serviceworker",
 		js: `
 			assert("serviceWorker" in navigator, "navigator.serviceWorker must exist");
-			assertEqual(typeof navigator.serviceWorker, "object", "serviceWorker container");
+			const c = navigator.serviceWorker;
+			assertEqual(typeof c, "object", "serviceWorker container");
+			assert(c instanceof ServiceWorkerContainer, "instanceof ServiceWorkerContainer");
+			assertEqual(Object.prototype.toString.call(c), "[object ServiceWorkerContainer]", "brand");
+			assertEqual(navigator.serviceWorker, c, "[SameObject]");
+			assertEqual(c.controller, null, "the proxy's worker must not show up as the controller");
+			assertEqual(c.ready, c.ready, "ready is the same promise");
+			assertDeepEqual(await c.getRegistrations(), [], "no registrations");
+			assertEqual(await c.getRegistration(), undefined, "getRegistration()");
+			let rejected = null;
+			try { await c.register("/sw.js"); } catch (e) { rejected = e; }
+			assert(rejected instanceof DOMException, "register() rejects with a DOMException");
+			assert(!String(rejected.message).includes("/~/sj/"), "the rejection must not expose the proxy URL");
+			let fired = false;
+			c.addEventListener("x", () => { fired = true; });
+			c.dispatchEvent(new Event("x"));
+			assert(fired, "the container is a working EventTarget");
+			const h = () => {};
+			c.onmessage = h;
+			assertEqual(c.onmessage, h, "onmessage round trip");
+			c.onmessage = null;
+		`,
+	}),
+	basicTest({
+		name: "platform-presentation-request-url",
+		js: `
+			if (typeof PresentationRequest !== "function") { pass(); return; }
+			// the url goes to the receiving display, not through the proxy, so it
+			// must be the site's url; the request has no getter for it, so this
+			// only checks that construction works with a relative url
+			new PresentationRequest("/cast.html");
+			new PresentationRequest(["/a.html", location.origin + "/b.html"]);
 		`,
 	}),
 	basicTest({

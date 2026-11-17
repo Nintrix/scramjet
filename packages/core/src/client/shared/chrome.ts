@@ -1,5 +1,8 @@
-// delete all chrome specific apis, or apis that are not supported by any browser other than chrome
-// these are not worth emulating and typically cause issues
+// delete chrome specific apis that would expose the proxy and aren't emulated yet.
+// every api removed here is a difference a page can observe (feature detection,
+// fingerprinting), so only delete what can't be left native. apis that never see
+// a url or an origin (bluetooth, hid, contact picker, idle detection, shape
+// detection, window controls overlay, ...) are left alone.
 
 import { iswindow } from "@client/entry";
 import { ScramjetClient } from "@client/index";
@@ -17,67 +20,12 @@ export default function (client: ScramjetClient, self: any) {
 		}
 	};
 
-	// obviously
-	// del("chrome");
-
-	// ShapeDetector https://developer.chrome.com/docs/capabilities/shape-detection
-	del("BarcodeDetector");
-	del("FaceDetector");
-	del("TextDetector");
-
-	// background synchronization api
-	if (iswindow) {
-		del("ServiceWorkerRegistration.prototype.sync");
-	}
-
-	// whatever this is
+	// protected audience: fetches bidding/scoring urls directly and keys
+	// interest groups on the real (proxy) origin
 	del("Navigator.prototype.joinAdInterestGroup");
 
 	if (!iswindow) return;
 	// DOM specific ones below here
-
-	Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-	del("MediaDevices.prototype.setCaptureHandleConfig");
-
-	// web bluetooth api
-	del("Navigator.prototype.bluetooth");
-	del("Bluetooth");
-	del("BluetoothDevice");
-	del("BluetoothRemoteGATTServer");
-	del("BluetoothRemoteGATTCharacteristic");
-	del("BluetoothRemoteGATTDescriptor");
-	del("BluetoothUUID");
-
-	// contact picker api
-	del("Navigator.prototype.contacts");
-	del("ContactAddress");
-	del("ContactManager");
-
-	// Idle Detection API
-	del("IdleDetector");
-
-	// Presentation API
-	del("Navigator.prototype.presentation");
-	del("Presentation");
-	del("PresentationConnection");
-	del("PresentationReceiver");
-	del("PresentationRequest");
-	del("PresentationAvailability");
-	del("PresentationConnectionAvailableEvent");
-	del("PresentationConnectionCloseEvent");
-	del("PresentationConnectionList");
-
-	// Window Controls Overlay API
-	del("WindowControlsOverlay");
-	del("WindowControlsOverlayGeometryChangeEvent");
-	del("Navigator.prototype.windowControlsOverlay");
-
-	// WebHID API
-	del("Navigator.prototype.hid");
-	del("HID");
-	del("HIDDevice");
-	del("HIDConnectionEvent");
-	del("HIDInputReportEvent");
 
 	// Navigation API (not chrome only but it's really annoying to implement)
 	del("navigation");
