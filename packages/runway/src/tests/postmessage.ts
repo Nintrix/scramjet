@@ -143,4 +143,52 @@ export default [
 			],
 		},
 	}),
+	// a primitive message with nothing to transfer used to report the receiving
+	// window as its source. sites like google sign-in check
+	// `event.source === window.parent` and drop the message otherwise
+	multiFrameTest({
+		name: "postmessage-multi-frame-source-to-child",
+		root: {
+			js: () => `
+                window.onload = () => {
+                    frames[0].postMessage("parent_frame_ready", "*");
+                };
+            `,
+			subframes: [
+				{
+					originid: "cross",
+					id: "child",
+					js: () => `
+                        addEventListener("message", (event) => {
+                            assertEqual(event.data, "parent_frame_ready", "message should be correct");
+                            assert(event.source !== window, "source must not be the receiving window");
+                            assertEqual(event.source, window.parent, "source should be the parent");
+                            pass();
+                        });
+                    `,
+				},
+			],
+		},
+	}),
+	multiFrameTest({
+		name: "postmessage-multi-frame-source-to-parent",
+		root: {
+			js: () => `
+                addEventListener("message", (event) => {
+                    assertEqual(event.data, 42, "message should be correct");
+                    assert(event.source !== window, "source must not be the receiving window");
+                    assertEqual(event.source, frames[0], "source should be the child");
+                    pass();
+                });
+            `,
+			subframes: [
+				{
+					id: "child",
+					js: () => `
+                        parent.postMessage(42, "*");
+                    `,
+				},
+			],
+		},
+	}),
 ];

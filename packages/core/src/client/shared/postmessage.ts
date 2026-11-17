@@ -1,7 +1,11 @@
 import { iswindow } from "@client/entry";
 import { SCRAMJETCLIENT } from "@/symbols";
 import { ScramjetClient } from "@client/index";
-import { Object_defineProperty } from "@/shared/snapshot";
+import {
+	Object_defineProperty,
+	Reflect_apply,
+	Reflect_deleteProperty,
+} from "@/shared/snapshot";
 import { POLLUTANT } from "./realm";
 
 export default function (client: ScramjetClient, self: Self) {
@@ -16,19 +20,23 @@ export default function (client: ScramjetClient, self: Self) {
 
 				let pollutant;
 
-				if (typeof ctx.args[0] === "object" && ctx.args[0] !== null) {
-					pollutant = ctx.args[0]; // try to use the first object we can find because it's more reliable
-				} else if (typeof ctx.args[2] === "object" && ctx.args[2] !== null) {
-					pollutant = ctx.args[2]; // next try to use transfer
-				} else if (
+				if (
 					ctx.this &&
 					POLLUTANT in ctx.this &&
 					typeof ctx.this[POLLUTANT] === "object" &&
 					ctx.this[POLLUTANT] !== null
 				) {
-					pollutant = ctx.this[POLLUTANT]; // lastly try to use the object from $setrealm
+					// set by $wrappostmessage/$setrealm in the caller's realm right before the call,
+					// so it's the most reliable. the message itself may have been created in another realm
+					pollutant = ctx.this[POLLUTANT];
+				} else if (typeof ctx.args[0] === "object" && ctx.args[0] !== null) {
+					pollutant = ctx.args[0]; // try to use the first object we can find
+				} else if (typeof ctx.args[2] === "object" && ctx.args[2] !== null) {
+					pollutant = ctx.args[2]; // next try to use transfer
 				} else {
-					pollutant = {}; // give up
+					// give up. this is our own realm, so the message will claim to come from the
+					// window it's being sent to
+					pollutant = {};
 				}
 
 				// and now we can steal Function from the caller's realm
@@ -102,8 +110,30 @@ export default function (client: ScramjetClient, self: Self) {
 	Object_defineProperty(self, client.config.globals.wrappostmessagefn, {
 		value: function (obj: any) {
 			if (!obj || typeof obj.postMessage !== "function") return obj;
+			const postMessage = obj.postMessage;
+
 			return {
-				postMessage: obj.postMessage.bind(obj),
+				postMessage(...args: any[]) {
+					// this runs in the caller's realm. mark the call with an object from it so the
+					// window.postMessage hook (which runs in the target's realm) can find the real
+					// sender even when the message is a primitive and there's nothing to transfer.
+					// without this event.source ends up being the target window itself
+					let marked = false;
+					try {
+						Object_defineProperty(obj, POLLUTANT, {
+							value: new self.Object(),
+							writable: false,
+							configurable: true,
+							enumerable: false,
+						});
+						marked = true;
+					} catch {}
+					try {
+						return Reflect_apply(postMessage, obj, args);
+					} finally {
+						if (marked) Reflect_deleteProperty(obj, POLLUTANT);
+					}
+				},
 			};
 		},
 		configurable: false,
